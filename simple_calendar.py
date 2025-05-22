@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import CallbackQuery
 
-from .schemas import SimpleCalendarCallback, SimpleCalAct, highlight, superscript
+from .schemas import SimpleCalendarCallback, PostButtonData, SimpleCalAct, highlight, superscript
 from .common import GenericCalendar
 
 
@@ -15,7 +15,8 @@ class SimpleCalendar(GenericCalendar):
     async def start_calendar(
         self,
         year: int = datetime.now().year,
-        month: int = datetime.now().month
+        month: int = datetime.now().month,
+        start_day: int|None = None,
     ) -> InlineKeyboardMarkup:
         """
         Creates an inline keyboard with the provided year and month
@@ -49,7 +50,7 @@ class SimpleCalendar(GenericCalendar):
 
         def highlight_day():
             day_string = format_day_string()
-            if now_month == month and now_year == year and now_day == day:
+            if (start_day if start_day else now_day) == day:
                 return highlight(day_string)
             return day_string
 
@@ -113,18 +114,13 @@ class SimpleCalendar(GenericCalendar):
             kb.append(days_row)
 
         # nav today & cancel button
-        # cancel_row = []
-        # cancel_row.append(InlineKeyboardButton(
-        #     text=self._labels.cancel_caption,
-        #     callback_data=SimpleCalendarCallback(act=SimpleCalAct.cancel, year=year, month=month, day=day).pack()
-        # ))
-        # cancel_row.append(InlineKeyboardButton(text=" ", callback_data=self.ignore_callback))
-        # cancel_row.append(InlineKeyboardButton(
-        #     text=self._labels.today_caption,
-        #     callback_data=SimpleCalendarCallback(act=SimpleCalAct.today, year=year, month=month, day=day).pack()
-        # ))
-        # kb.append(cancel_row)
-        return InlineKeyboardMarkup(row_width=7, inline_keyboard=kb)
+        if not start_day:
+          back_post_row = []
+          back_post_row.append(InlineKeyboardButton(text="‹ Назад к посту", callback_data=PostButtonData(
+                    action="back", type="post_settings_action"
+                ).pack()))
+          kb.append(back_post_row)
+        return InlineKeyboardMarkup(inline_keyboard=kb)
 
     async def _update_calendar(self, query: CallbackQuery, with_date: datetime):
         await query.message.edit_reply_markup(

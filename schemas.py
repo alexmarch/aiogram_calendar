@@ -27,6 +27,10 @@ class DialogCalAct(str, Enum):
     start = 'START'
     day = 'SET-DAY'
 
+class PostButtonData(CallbackData, prefix="post"):
+    action: str
+    type: str = "settings"
+    data: str | None = None
 
 class CalendarCallback(CallbackData, prefix="calendar"):
     act: str
