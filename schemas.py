@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 
@@ -38,6 +39,14 @@ class CalendarCallback(CallbackData, prefix="calendar"):
     year: Optional[int] = None
     month: Optional[int] = None
     day: Optional[int] = None
+    type: Optional[str] = None
+    selected_dates: Optional[str] = None
+
+
+class GeneralSettingsButtonData(CallbackData, prefix="settings"):
+    action: str
+    type: str = "general_settings"
+    data: str | None = None
 
 
 class SimpleCalendarCallback(CalendarCallback, prefix="simple_calendar"):

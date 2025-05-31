@@ -1,10 +1,12 @@
 import calendar
 from datetime import datetime, timedelta
 
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from .common import GenericCalendar
 from .schemas import (
+    GeneralSettingsButtonData,
     PostButtonData,
     SimpleCalAct,
     SimpleCalendarCallback,
@@ -25,6 +27,7 @@ class SimpleCalendar(GenericCalendar):
         year: int = datetime.now().year,
         month: int = datetime.now().month,
         start_day: int | None = None,
+        action: str = "",
     ) -> InlineKeyboardMarkup:
         """
         Creates an inline keyboard with the provided year and month for multi-select calendar
@@ -39,8 +42,6 @@ class SimpleCalendar(GenericCalendar):
             None,
             None,
         )  # today.month, today.year, today.day
-
-        print(selected_dates)
 
         def highlight_month():
             month_str = self._labels.months[month - 1]
@@ -94,7 +95,7 @@ class SimpleCalendar(GenericCalendar):
             InlineKeyboardButton(
                 text="<<",
                 callback_data=SimpleCalendarCallback(
-                    act=SimpleCalAct.prev_y, year=year, month=month, day=1
+                    act=SimpleCalAct.prev_y, year=year, month=month, day=1, type="multi"
                 ).pack(),
             )
         )
@@ -108,36 +109,11 @@ class SimpleCalendar(GenericCalendar):
             InlineKeyboardButton(
                 text=">>",
                 callback_data=SimpleCalendarCallback(
-                    act=SimpleCalAct.next_y, year=year, month=month, day=1
+                    act=SimpleCalAct.next_y, year=year, month=month, day=1, type="multi"
                 ).pack(),
             )
         )
         kb.append(years_row)
-
-        # Month nav Buttons
-        month_row = []
-        month_row.append(
-            InlineKeyboardButton(
-                text="<",
-                callback_data=SimpleCalendarCallback(
-                    act=SimpleCalAct.prev_m, year=year, month=month, day=1
-                ).pack(),
-            )
-        )
-        month_row.append(
-            InlineKeyboardButton(
-                text=highlight_month(), callback_data=self.ignore_callback
-            )
-        )
-        month_row.append(
-            InlineKeyboardButton(
-                text=">",
-                callback_data=SimpleCalendarCallback(
-                    act=SimpleCalAct.next_m, year=year, month=month, day=1
-                ).pack(),
-            )
-        )
-        kb.append(month_row)
 
         # Week Days
         week_days_labels_row = []
@@ -147,6 +123,7 @@ class SimpleCalendar(GenericCalendar):
                     text=highlight_weekday(), callback_data=self.ignore_callback
                 )
             )
+
         kb.append(week_days_labels_row)
 
         # Calendar rows - Days of month
@@ -172,6 +149,32 @@ class SimpleCalendar(GenericCalendar):
                 )
             kb.append(days_row)
 
+        # Month nav Buttons
+        month_row = []
+        month_row.append(
+            InlineKeyboardButton(
+                text="<",
+                callback_data=SimpleCalendarCallback(
+                    act=SimpleCalAct.prev_m, year=year, month=month, day=1, type="multi"
+                ).pack(),
+            )
+        )
+        month_row.append(
+            InlineKeyboardButton(
+                text=highlight_month(), callback_data=self.ignore_callback
+            )
+        )
+        month_row.append(
+            InlineKeyboardButton(
+                text=">",
+                callback_data=SimpleCalendarCallback(
+                    act=SimpleCalAct.next_m, year=year, month=month, day=1, type="multi"
+                ).pack(),
+            )
+        )
+
+        kb.append(month_row)
+
         # nav today & cancel button
         if not start_day:
             back_post_row = []
@@ -184,6 +187,26 @@ class SimpleCalendar(GenericCalendar):
                 )
             )
             kb.append(back_post_row)
+
+        if action in [
+            SimpleCalAct.prev_m,
+            SimpleCalAct.next_m,
+            SimpleCalAct.prev_y,
+            SimpleCalAct.next_y,
+        ]:
+            next_btn_row = []
+            next_btn_row.append(
+                InlineKeyboardButton(
+                    text=f"Далее ›",
+                    callback_data=GeneralSettingsButtonData(
+                        action="show_multi_timeframe",
+                        type="general_settings_action",
+                        data="back",
+                    ).pack(),
+                )
+            )
+            kb.append(next_btn_row)
+
         return InlineKeyboardMarkup(inline_keyboard=kb)
 
     async def start_calendar(
@@ -330,15 +353,38 @@ class SimpleCalendar(GenericCalendar):
             kb.append(back_post_row)
         return InlineKeyboardMarkup(inline_keyboard=kb)
 
-    async def _update_calendar(self, query: CallbackQuery, with_date: datetime):
-        await query.message.edit_reply_markup(
-            reply_markup=await self.start_calendar(
-                int(with_date.year), int(with_date.month)
+    async def _update_calendar(
+        self,
+        query: CallbackQuery,
+        with_date: datetime,
+        c_type: str = "simple",
+        state: FSMContext = None,
+        action: str = "",
+    ) -> None:
+        if c_type == "multi":
+            state_data = await state.get_data()
+            auto_repeat_dates = state_data.get("auto_repeat_dates", [])
+            selected_dates = [
+                datetime.strptime(date_str, "%d/%m/%Y")
+                for date_str in auto_repeat_dates
+            ]
+            await query.message.edit_reply_markup(
+                reply_markup=await self.start_multiselect_calendar(
+                    year=int(with_date.year),
+                    month=int(with_date.month),
+                    selected_dates=selected_dates,
+                    action=action,
+                )
             )
-        )
+        else:
+            await query.message.edit_reply_markup(
+                reply_markup=await self.start_calendar(
+                    int(with_date.year), int(with_date.month)
+                )
+            )
 
     async def process_selection(
-        self, query: CallbackQuery, data: SimpleCalendarCallback
+        self, query: CallbackQuery, data: SimpleCalendarCallback, state: FSMContext
     ) -> tuple:
         """
         Process the callback_query. This method generates a new calendar if forward or
@@ -356,7 +402,8 @@ class SimpleCalendar(GenericCalendar):
             return return_data
 
         temp_date = datetime(int(data.year), int(data.month), 1)
-
+        c_type = data.type
+        h_selected_dates = data.selected_dates if data.selected_dates else ""
         # user picked a day button, return date
         if data.act == SimpleCalAct.day:
             return await self.process_day_select(data, query)
@@ -364,23 +411,25 @@ class SimpleCalendar(GenericCalendar):
         # user navigates to previous year, editing message with new calendar
         if data.act == SimpleCalAct.prev_y:
             prev_date = datetime(int(data.year) - 1, int(data.month), 1)
-            await self._update_calendar(query, prev_date)
+            await self._update_calendar(query, prev_date, c_type, state, data.act)
         # user navigates to next year, editing message with new calendar
         if data.act == SimpleCalAct.next_y:
             next_date = datetime(int(data.year) + 1, int(data.month), 1)
-            await self._update_calendar(query, next_date)
+            await self._update_calendar(query, next_date, c_type, state, data.act)
         # user navigates to previous month, editing message with new calendar
         if data.act == SimpleCalAct.prev_m:
             prev_date = temp_date - timedelta(days=1)
-            await self._update_calendar(query, prev_date)
+            await self._update_calendar(query, prev_date, c_type, state, data.act)
         # user navigates to next month, editing message with new calendar
         if data.act == SimpleCalAct.next_m:
             next_date = temp_date + timedelta(days=31)
-            await self._update_calendar(query, next_date)
+            await self._update_calendar(query, next_date, c_type, state, data.act)
         if data.act == SimpleCalAct.today:
             next_date = datetime.now()
             if next_date.year != int(data.year) or next_date.month != int(data.month):
-                await self._update_calendar(query, datetime.now())
+                await self._update_calendar(
+                    query, datetime.now(), c_type, state, data.act
+                )
             else:
                 await query.answer(cache_time=60)
         if data.act == SimpleCalAct.cancel:
